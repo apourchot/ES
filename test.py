@@ -1,13 +1,12 @@
 from Environnement import Env
 from NNs import FFIndiv
-from Samplers import BasicSampler
+from Samplers import GaussianSampler
 
 from time import time
 
 import numpy as np
-import scipy.stats as sps
 
-env = Env("Acrobot-v1")
+env = Env("CartPole-v0")
 act_space = env.get_action_space()
 obs_space = env.get_obs_space()
 
@@ -15,17 +14,14 @@ print("Act space:", act_space)
 print("Obs space:", obs_space)
 
 nn = FFIndiv(obs_space, act_space)
-sampler = BasicSampler(0, 0, nn.get_params())
+sampler = GaussianSampler(0, 0)
 
 a = time()
-pop = sampler.sample()
-grad = sampler.grad_p
+batch = sampler.sample(32, nn.get_params(), np.eye(nn.get_params().shape[0]))
 
-print(grad[0][:10])
-print(pop[0][:10])
 print(nn.get_params()[:10])
-print(time()-a)
+print(time() - a)
 
-for ind in pop:
+for ind in batch:
     nn.set_params(ind)
     print(env.eval(nn, render=False, t_max=1000))

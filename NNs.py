@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 
+
 class FFIndiv(nn.Module):
 
     def __init__(self, obs_space, action_space, hidden_size=32):
@@ -46,7 +47,8 @@ class FFIndiv(nn.Module):
         # putting parameters in the right shape
         for k, v in zip(state_dict.keys(), state_dict.values()):
             tmp = np.product(v.size())
-            state_dict[k] = torch.from_numpy(params[cpt:cpt+tmp]).view(v.size())
+            state_dict[k] = torch.from_numpy(
+                params[cpt:cpt + tmp]).view(v.size())
             cpt += tmp
 
         # setting parameters of the network
@@ -57,8 +59,7 @@ class FFIndiv(nn.Module):
         Params that should be trained on.
         """
         return np.hstack([v.numpy().flatten() for v in
-                            self.state_dict().values()])
-
+                          self.state_dict().values()])
 
     def get_action(self, obs):
         """
@@ -72,7 +73,6 @@ class FFIndiv(nn.Module):
                 return torch.argmax(F.softmax(tmp, dim=1)).numpy()
             else:
                 return tmp.numpy()
-
 
     def forward(self, x):
         """

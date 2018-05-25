@@ -3,6 +3,10 @@ import gym
 
 class Env():
 
+    """
+    Simple wrapper for OpenAI gym
+    """
+
     def __init__(self, name):
 
         self.env = gym.make(name)

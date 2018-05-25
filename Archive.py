@@ -22,5 +22,9 @@ class Archive(list):
         for sample in samples:
             self.add_sample(sample)
 
+    def add_gen(self, idx, gen):
+
+        self[idx].gens.append(gen)
+
     def get_size(self):
         return min(self.max_size, self.cpt)

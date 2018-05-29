@@ -602,9 +602,9 @@ class CMAES:
             epsilon = np.concatenate([epsilon_half, - epsilon_half])
 
         else:
-            epsilon = np.random.randn(pop_size, self.num_params)
+            epsilon = np.random.randn(self.num_params, pop_size)
 
-        return self.mu + (self.step_size * self.coord @ (np.sqrt(self.diag) * epsilon).T).T
+        return self.mu + self.step_size * (self.coord @ np.diag(np.sqrt(self.diag)) @ epsilon).T
 
     def tell(self, solutions, scores):
         """
@@ -631,7 +631,7 @@ class CMAES:
 
         # update covariance matrix
         tmp_2 = 1 / self.step_size * \
-            solutions[idx_sorted[:self.parents]] - old_mu
+            (solutions[idx_sorted[:self.parents]] - old_mu)
 
         self.cov = (1 - self.c_1 - self.c_mu) * self.cov + \
             (1 - tmp_1) * self.c_1 * self.c_c * (2 - self.c_c) * self.cov + \
@@ -647,7 +647,7 @@ class CMAES:
         self.diag, self.coord = np.linalg.eigh(self.cov)
         self.diag = np.real(self.diag)
 
-        # print(self.diag)
+
         self.inv_sqrt_cov = self.coord @ np.diag(
             1 / np.sqrt(self.diag)) @ self.coord.T
 

@@ -8,7 +8,7 @@ class Env():
     """
 
     def __init__(self, name):
-
+        self.name = name
         self.env = gym.make(name)
 
     def close(self):
@@ -39,6 +39,9 @@ class Env():
         else:
             size = space.n
         return (name, size)
+
+    def get_name(self):
+        return self.name
 
     def eval(self, nn, render=False, t_max=200):
         """

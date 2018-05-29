@@ -104,6 +104,7 @@ class ParentSampler():
                  accept_ratio=0.5):
         self.sample_archive = sample_archive
         self.thetas_archive = thetas_archive
+        self.accept_ratio = accept_ratio
         self.alpha = 1 - accept_ratio
 
     def ask(self, pop_size, optimizer):
@@ -141,8 +142,10 @@ class ParentSampler():
             sample = old_batch[i]
             params = sample.params
             u = np.random.uniform(0, 1)
+            ratio = new_pdf(params) / old_pdf(params)
+            self.alpha = 1 - self.accept_ratio / ratio
 
-            if u < (1 - self.alpha) * new_pdf(params) / old_pdf(params):
+            if u < (1 - self.alpha) * ratio:
                 batch[cpt] = params
                 scores_reused.append(sample.score)
                 idx_reused.append(len(self.sample_archive) - pop_size + i)
@@ -171,7 +174,7 @@ class BestAncestorSamplerES():
 
     """
     Using importance mixing on the previous "most likely"
-    samples from the archive, optimized for isotropic 
+    samples from the archive, optimized for isotropic
     covariance matrices
     """
 
@@ -298,7 +301,219 @@ class BestAncestorSampler():
         cov = thetas.cov
 
         def new_pdf(z):
+            return multivariate_normal.pdf(z, mean, cov, allow_singular=True)
+
+        ratios = {}
+        for i in range(len(self.sample_archive)):
+
+            # sample
+            sample = self.sample_archive[i]
+            params = sample.params
+
+            # all precedent distributions
+            for j in range(len(sample.gens)):
+
+                # parameters
+                old_thetas = self.thetas_archive[sample.gens[j]]
+                old_mean = old_thetas.mean
+                old_cov = old_thetas.cov
+
+                r = new_pdf(params) / \
+                    multivariate_normal.pdf(params, old_mean, old_cov)
+                ratios[(i, j)] = r
+
+        sorted_ratios = sorted(ratios.items(),
+                               key=operator.itemgetter(1))[-pop_size:]
+        batch = np.zeros((pop_size, mean.shape[0]))
+
+        cpt = 0
+        scores_reused = []
+        idx_reused = []
+        to_draw = []
+
+        # rejection sampling
+        for i in range(pop_size):
+
+            (id_sample, gen), ratio = sorted_ratios[i]
+            sample = self.sample_archive[id_sample]
+            params = sample.params
+            u = np.random.uniform(0, 1)
+
+            self.alpha = 1 - self.accept_ratio / ratio
+
+            if u < (1 - self.alpha) * ratio:
+                batch[cpt] = params
+                scores_reused.append(sample.score)
+                idx_reused.append(id_sample)
+                cpt += 1
+
+            else:
+                to_draw.append(sample.gens[gen])
+
+        n_reused = cpt
+
+        # inverse rejection sampling
+        while len(to_draw) > 0:
+
+            params = optimizer.ask(1).reshape(-1)
+            gen = to_draw[-1]
+            old_thetas = self.thetas_archive[gen]
+            old_mean = old_thetas.mean
+            old_cov = old_thetas.cov
+
+            def old_pdf(z):
+                return multivariate_normal.pdf(z, old_mean, old_cov)
+
+            u = np.random.uniform(0, 1)
+            if u < self.alpha:
+                batch[cpt] = params
+                to_draw.pop()
+                cpt += 1
+
+            elif u < 1 - old_pdf(params) / new_pdf(params):
+                batch[cpt] = params
+                to_draw.pop()
+                cpt += 1
+
+        return batch, n_reused, idx_reused, scores_reused
+
+
+class ThetaSampler():
+
+    """
+
+    """
+
+    def __init__(self, sample_archive, thetas_archive,
+                 accept_ratio=0.5):
+        self.sample_archive = sample_archive
+        self.thetas_archive = thetas_archive
+        self.alpha = 1 - accept_ratio
+        self.accept_ratio = accept_ratio
+
+    def ask(self, pop_size, optimizer):
+
+        if len(self.sample_archive) < pop_size:
+            return optimizer.ask(pop_size), 0, [], []
+
+        def KLS(mean_0, cov_0, mean_1, cov_1):
+
+            inv_cov_0 = np.linalg.pinv(cov_0)
+            inv_cov_1 = np.linalg.pinv(cov_1)
+
+            tmp = np.trace(inv_cov_1@cov_0) + np.trace(inv_cov_0@cov_1)
+            tmp += (mean_1 - mean_0).T@(inv_cov_1 +
+                                        inv_cov_0)@(mean_1 - mean_0)
+            tmp -= 2 * mean_1.shape[0]
+            return 1 / 2 * tmp
+
+        def softmax(x):
+            e_x = np.exp(x - np.max(x))
+            return e_x / e_x.sum()
+
+        # new stuff
+        theta = self.thetas_archive[-1]
+        mean = theta.mean
+        cov = theta.cov
+
+        def new_pdf(z):
             return multivariate_normal.pdf(z, mean, cov)
+
+        d = []
+        for old_theta in self.thetas_archive[:-1]:
+            old_mean = old_theta.mean
+            old_cov = old_theta.cov
+            tmp = KLS(mean, cov, old_mean, old_cov)
+            d.append(1 / tmp ** 5)
+        d = d / np.sum(d)
+        # print(d)
+
+        cpt = 0
+        scores_reused = []
+        idx_reused = []
+        to_draw = []
+        batch = np.zeros((pop_size, mean.shape[0]))
+
+        # rejection sampling
+        for i in range(pop_size):
+
+            id_theta = np.random.choice(len(self.thetas_archive[:-1]), p=d)
+            theta = self.thetas_archive[id_theta]
+            id_sample = np.random.choice(theta.samples)
+            sample = self.sample_archive[id_sample]
+
+            params = sample.params
+            old_mean = theta.mean
+            old_cov = theta.cov
+
+            ratio = new_pdf(params) / \
+                multivariate_normal.pdf(params, old_mean, old_cov)
+            u = np.random.uniform(0, 1)
+
+            self.alpha = 1 - self.accept_ratio / ratio
+
+            if u < (1 - self.alpha) * ratio:
+                batch[cpt] = params
+                scores_reused.append(sample.score)
+                idx_reused.append(id_sample)
+                cpt += 1
+
+            else:
+                to_draw.append(theta)
+
+        n_reused = cpt
+
+        # inverse rejection sampling
+        while len(to_draw) > 0:
+
+            params = optimizer.ask(1).reshape(-1)
+            old_theta = to_draw[-1]
+            old_mean = old_theta.mean
+            old_cov = old_theta.cov
+
+            def old_pdf(z):
+                return multivariate_normal.pdf(z, old_mean, old_cov)
+
+            u = np.random.uniform(0, 1)
+            if u < self.alpha:
+                batch[cpt] = params
+                to_draw.pop()
+                cpt += 1
+
+            elif u < 1 - old_pdf(params) / new_pdf(params):
+                batch[cpt] = params
+                to_draw.pop()
+                cpt += 1
+
+        return batch, n_reused, idx_reused, scores_reused
+
+
+class BestAncestorSampler():
+
+    """
+    Using importance mixing on the previous "most likely"
+    samples from the archive
+    """
+
+    def __init__(self, sample_archive, thetas_archive,
+                 accept_ratio=0.5):
+        self.sample_archive = sample_archive
+        self.thetas_archive = thetas_archive
+        self.accept_ratio = accept_ratio
+        self.alpha = 1
+
+    def ask(self, pop_size, optimizer):
+
+        if len(self.sample_archive) < pop_size:
+            return optimizer.ask(pop_size), 0, [], []
+
+        # new stuff
+        thetas = self.thetas_archive[-1]
+        mean = thetas.mean
+        cov = thetas.cov
+
+        def new_pdf(z):
+            return multivariate_normal.pdf(z, mean, cov, allow_singular=True)
 
         ratios = {}
         for i in range(len(self.sample_archive)):
